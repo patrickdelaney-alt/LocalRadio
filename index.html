@@ -576,7 +576,22 @@
     </div>
   </div>
 
+  <!-- YouTube IFrame API -->
+  <script src="https://www.youtube.com/iframe_api"></script>
+
   <script>
+    // YouTube API ready flag
+    let ytApiReady = false;
+    let ytPlayerInstance = null;
+    let syncInterval = null;
+    const SYNC_INTERVAL_MS = 2000;
+    const SYNC_THRESHOLD_S = 3;
+
+    function onYouTubeIframeAPIReady() {
+      ytApiReady = true;
+      console.log('YouTube IFrame API ready');
+    }
+
     // Firebase Configuration
     const firebaseConfig = {
       apiKey: "AIzaSyD9DO3UUHNRO8v6-L--MhHpDYTMKI3sH_g",
@@ -635,14 +650,20 @@
     }
 
     function showHomeScreen() {
+      if (syncInterval) { clearInterval(syncInterval); syncInterval = null; }
+      if (ytPlayerInstance) { try { ytPlayerInstance.destroy(); } catch(e) {} ytPlayerInstance = null; }
       if (state.roomRef) {
+        state.roomRef.child('currentVideo').off();
+        state.roomRef.child('messages').off();
+        state.roomRef.child('listeners').off();
+        state.roomRef.child('playbackState').off();
         database.ref(`rooms/${state.roomCode}/listeners/${state.userId}`).remove();
       }
       showScreen('home-screen');
-      state = { 
-        isHost: false, 
-        roomCode: null, 
-        currentVideo: null, 
+      state = {
+        isHost: false,
+        roomCode: null,
+        currentVideo: null,
         userName: 'Anonymous',
         userId: 'user_' + Math.random().toString(36).substr(2, 9),
         roomRef: null,
@@ -746,11 +767,30 @@
       state.roomRef.child('currentVideo').on('value', (snapshot) => {
         const videoId = snapshot.val();
         console.log('Video update received:', videoId, 'Current:', state.currentVideo);
-        if (videoId) {
+        if (videoId && videoId !== state.currentVideo) {
           state.currentVideo = videoId;
-          playVideo(videoId);
+          if (!state.isHost) {
+            // Listener: check if there's a playback state to sync to
+            state.roomRef.child('playbackState').once('value', (pbSnap) => {
+              const pb = pbSnap.val();
+              if (pb && pb.videoId === videoId && pb.currentTime > 0) {
+                const elapsed = (Date.now() - pb.updatedAt) / 1000;
+                const startAt = pb.isPlaying ? pb.currentTime + elapsed : pb.currentTime;
+                playVideo(videoId, startAt);
+              } else {
+                playVideo(videoId, 0);
+              }
+            });
+          } else {
+            playVideo(videoId, 0);
+          }
         }
       });
+
+      // Listeners: start syncing to host's playback state
+      if (!state.isHost) {
+        startListenerSync();
+      }
 
       // Listen for chat messages
       state.roomRef.child('messages').on('child_added', (snapshot) => {
@@ -791,44 +831,84 @@
       }
 
       document.getElementById('video-url').value = '';
-      
-      // Update in database - this will trigger playVideo for everyone
-      state.roomRef.update({
-        currentVideo: videoId
-      });
+
+      // If same video, clear first so Firebase fires the listener again
+      if (videoId === state.currentVideo) {
+        state.roomRef.update({ currentVideo: null }).then(() => {
+          state.currentVideo = null;
+          state.roomRef.update({ currentVideo: videoId });
+        });
+      } else {
+        state.roomRef.update({ currentVideo: videoId });
+      }
 
       sendSystemMessage('🎵 Now playing!');
     }
 
-    function playVideo(videoId) {
-      console.log('playVideo called with:', videoId, 'isHost:', state.isHost);
-      
+    function playVideo(videoId, startAt) {
+      console.log('playVideo called with:', videoId, 'isHost:', state.isHost, 'startAt:', startAt);
+
+      // Stop any existing sync interval
+      if (syncInterval) {
+        clearInterval(syncInterval);
+        syncInterval = null;
+      }
+
+      // Destroy existing player
+      if (ytPlayerInstance) {
+        try { ytPlayerInstance.destroy(); } catch(e) {}
+        ytPlayerInstance = null;
+      }
+
       // Clear both containers first
       const hostContainer = document.getElementById('host-player-container');
       const listenerContainer = document.getElementById('listener-player-container');
       if (hostContainer) hostContainer.innerHTML = '';
       if (listenerContainer) listenerContainer.innerHTML = '';
-      
+
       const containerId = state.isHost ? 'host-player-container' : 'listener-player-container';
       const nowPlayingId = state.isHost ? 'host-now-playing' : 'listener-now-playing';
-      
+
       const container = document.getElementById(containerId);
       if (!container) {
         console.error('Container not found:', containerId);
         return;
       }
-      
+
       console.log('Creating player in:', containerId);
-      
-      container.innerHTML = `
-        <div class="player">
-          <iframe 
-            src="https://www.youtube.com/embed/${videoId}?autoplay=1&controls=1&enablejsapi=1&origin=${window.location.origin}" 
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowfullscreen>
-          </iframe>
-        </div>
-      `;
+
+      // Create a div for the YT.Player to attach to
+      container.innerHTML = '<div class="player"><div id="yt-player-target"></div></div>';
+
+      const startSeconds = startAt || 0;
+
+      if (ytApiReady) {
+        createYTPlayer(videoId, startSeconds);
+      } else {
+        // Fallback: wait for API, then create player
+        const waitForApi = setInterval(() => {
+          if (ytApiReady) {
+            clearInterval(waitForApi);
+            createYTPlayer(videoId, startSeconds);
+          }
+        }, 200);
+        // Timeout after 5 seconds - fall back to iframe embed
+        setTimeout(() => {
+          clearInterval(waitForApi);
+          if (!ytPlayerInstance) {
+            console.warn('YT API not ready, falling back to iframe');
+            container.innerHTML = `
+              <div class="player">
+                <iframe
+                  src="https://www.youtube.com/embed/${videoId}?autoplay=1&controls=1&start=${Math.floor(startSeconds)}"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowfullscreen>
+                </iframe>
+              </div>
+            `;
+          }
+        }, 5000);
+      }
 
       const nowPlaying = document.getElementById(nowPlayingId);
       if (nowPlaying) {
@@ -839,6 +919,102 @@
           </div>
         `;
       }
+    }
+
+    function createYTPlayer(videoId, startSeconds) {
+      ytPlayerInstance = new YT.Player('yt-player-target', {
+        width: '100%',
+        height: '295',
+        videoId: videoId,
+        playerVars: {
+          autoplay: 1,
+          controls: 1,
+          start: Math.floor(startSeconds),
+          origin: window.location.origin
+        },
+        events: {
+          onReady: (event) => {
+            console.log('YT Player ready');
+            // If we have a more precise startSeconds (with decimals), seek to it
+            if (startSeconds > 0) {
+              event.target.seekTo(startSeconds, true);
+            }
+            event.target.playVideo();
+
+            if (state.isHost) {
+              startHostSync();
+            }
+          },
+          onStateChange: (event) => {
+            if (state.isHost) {
+              broadcastPlaybackState();
+            }
+          }
+        }
+      });
+    }
+
+    // Host: broadcast playback state to Firebase periodically
+    function startHostSync() {
+      if (syncInterval) clearInterval(syncInterval);
+      broadcastPlaybackState();
+      syncInterval = setInterval(broadcastPlaybackState, SYNC_INTERVAL_MS);
+    }
+
+    function broadcastPlaybackState() {
+      if (!ytPlayerInstance || !state.isHost || !state.roomRef) return;
+      try {
+        const playerState = ytPlayerInstance.getPlayerState();
+        const currentTime = ytPlayerInstance.getCurrentTime();
+        const isPlaying = (playerState === YT.PlayerState.PLAYING);
+
+        state.roomRef.child('playbackState').set({
+          videoId: state.currentVideo,
+          currentTime: currentTime,
+          isPlaying: isPlaying,
+          updatedAt: firebase.database.ServerValue.TIMESTAMP
+        });
+      } catch(e) {
+        console.warn('Could not broadcast playback state:', e);
+      }
+    }
+
+    // Listener: sync to host's playback state
+    function startListenerSync() {
+      state.roomRef.child('playbackState').on('value', (snapshot) => {
+        const playback = snapshot.val();
+        if (!playback || !ytPlayerInstance) return;
+
+        // Only sync if it's the same video
+        if (playback.videoId !== state.currentVideo) return;
+
+        try {
+          const playerState = ytPlayerInstance.getPlayerState();
+          const localTime = ytPlayerInstance.getCurrentTime();
+
+          // Account for time elapsed since host's update
+          const now = Date.now();
+          const elapsed = (now - playback.updatedAt) / 1000;
+          const hostTime = playback.isPlaying ? playback.currentTime + elapsed : playback.currentTime;
+
+          const drift = Math.abs(localTime - hostTime);
+
+          // Seek if drifted too far
+          if (drift > SYNC_THRESHOLD_S) {
+            console.log(`Sync correction: drift=${drift.toFixed(1)}s, seeking to ${hostTime.toFixed(1)}s`);
+            ytPlayerInstance.seekTo(hostTime, true);
+          }
+
+          // Match play/pause state
+          if (playback.isPlaying && playerState !== YT.PlayerState.PLAYING) {
+            ytPlayerInstance.playVideo();
+          } else if (!playback.isPlaying && playerState === YT.PlayerState.PLAYING) {
+            ytPlayerInstance.pauseVideo();
+          }
+        } catch(e) {
+          console.warn('Sync error:', e);
+        }
+      });
     }
 
     // Chat functionality
@@ -903,6 +1079,7 @@
 
     // Cleanup on page unload
     window.addEventListener('beforeunload', () => {
+      if (syncInterval) clearInterval(syncInterval);
       if (state.roomRef) {
         database.ref(`rooms/${state.roomCode}/listeners/${state.userId}`).remove();
       }
