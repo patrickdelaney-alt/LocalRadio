@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>LocalRadio v3.0</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg: #0a0a0a;
+      --surface: #1a1a1a;
+      --primary: #00ff88;
+      --secondary: #ff0066;
+      --text: #ffffff;
+      --text-dim: #888888;
+      --border: #333333;
+    }
+
+    body {
+      font-family: 'Space Mono', monospace;
+      background: var(--bg);
+      color: var(--text);
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+      position: relative;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: 
+        radial-gradient(circle at 20% 50%, rgba(0, 255, 136, 0.03) 0%, transparent 50%),
+        radial-gradient(circle at 80% 80%, rgba(255, 0, 102, 0.03) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .app {
+      position: relative;
+      z-index: 1;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    header {
+      text-align: center;
+      padding: 40px 0 60px;
+      position: relative;
+    }
+
+    h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: 3.5rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+      animation: glow 3s ease-in-out infinite;
+    }
+
+    @keyframes glow {
+      0%, 100% { filter: drop-shadow(0 0 20px rgba(0, 255, 136, 0.3)); }
+      50% { filter: drop-shadow(0 0 30px rgba(255, 0, 102, 0.3)); }
+    }
+
+    .tagline {
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .screen {
+      display: none;
+      animation: fadeIn 0.5s ease;
+    }
+
+    .screen.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .btn {
+      background: var(--surface);
+      border: 2px solid var(--border);
+      color: var(--text);
+      padding: 18px 32px;
+      font-family: 'Space Mono', monospace;
+      font-size: 1rem;
+      font-weight: 700;
+      border-radius: 8px;
+      cursor: pointer;
+      width: 100%;
+      margin: 12px 0;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+      transition: left 0.5s;
+    }
+
+    .btn:hover::before {
+      left: 100%;
+    }
+
+    .btn:hover {
+      border-color: var(--primary);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0, 255, 136, 0.2);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary) 0%, #00cc6a 100%);
+      border: none;
+      color: var(--bg);
+    }
+
+    .btn-primary:hover {
+      box-shadow: 0 8px 24px rgba(0, 255, 136, 0.4);
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      margin: 16px 0;
+      position: relative;
+    }
+
+    .qr-container {
+      text-align: center;
+      padding: 32px;
+      background: white;
+      border-radius: 12px;
+      margin: 24px 0;
+    }
+
+    #qrcode {
+      display: inline-block;
+    }
+
+    .room-code {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--primary);
+      margin: 16px 0;
+      font-family: 'Syne', sans-serif;
+      letter-spacing: 0.1em;
+    }
+
+    input {
+      background: var(--bg);
+      border: 2px solid var(--border);
+      color: var(--text);
+      padding: 16px;
+      font-family: 'Space Mono', monospace;
+      font-size: 1rem;
+      border-radius: 8px;
+      width: 100%;
+      margin: 12px 0;
+      transition: border-color 0.3s;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    input::placeholder {
+      color: var(--text-dim);
+    }
+
+    .player {
+      margin: 24px 0;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid var(--border);
+    }
+
+    .player iframe {
+      width: 100%;
+      height: 315px;
+      border: none;
+      display: block;
+    }
+
+    .now-playing {
+      padding: 20px;
+      background: var(--surface);
+      border-radius: 8px;
+      margin: 16px 0;
+      border-left: 4px solid var(--primary);
+    }
+
+    .now-playing h3 {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+    }
+
+    .now-playing p {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .chat-container {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin: 24px 0;
+      overflow: hidden;
+      height: 400px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chat-header {
+      padding: 16px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-size: 0.85rem;
+    }
+
+    .chat-messages {
+      flex: 1;
+      padding: 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .message {
+      padding: 12px 16px;
+      background: var(--bg);
+      border-radius: 8px;
+      border-left: 3px solid var(--primary);
+      animation: slideIn 0.3s ease;
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-10px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    .message-author {
+      font-size: 0.75rem;
+      color: var(--primary);
+      margin-bottom: 4px;
+      font-weight: 700;
+    }
+
+    .message-text {
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    .chat-input-container {
+      display: flex;
+      gap: 8px;
+      padding: 16px;
+      background: var(--bg);
+      border-top: 1px solid var(--border);
+    }
+
+    .chat-input-container input {
+      margin: 0;
+      flex: 1;
+    }
+
+    .chat-input-container button {
+      margin: 0;
+      width: auto;
+      padding: 16px 24px;
+    }
+
+    .status {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background: var(--primary);
+      border-radius: 50%;
+      margin-right: 8px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .info-text {
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      text-align: center;
+      margin: 16px 0;
+      line-height: 1.6;
+    }
+
+    .back-btn {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.85rem;
+      transition: all 0.3s;
+    }
+
+    .back-btn:hover {
+      background: var(--bg);
+      border-color: var(--primary);
+    }
+
+    .listener-count {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    @media (max-width: 600px) {
+      h1 {
+        font-size: 2.5rem;
+      }
+
+      .app {
+        padding: 16px;
+      }
+
+      header {
+        padding: 30px 0 40px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>LocalRadio</h1>
+      <p class="tagline">Hyperlocal Sync Radio</p>
+    </header>
+
+    <!-- Home Screen -->
+    <div id="home-screen" class="screen active">
+      <div class="card">
+        <p class="info-text">
+          Create a room and share the code. Everyone tunes in sync, everyone talks together.
+        </p>
+        <button class="btn btn-primary" onclick="showHostScreen()">Host a Room</button>
+        <button class="btn" onclick="showJoinScreen()">Join a Room</button>
+      </div>
+    </div>
+
+    <!-- Host Screen -->
+    <div id="host-screen" class="screen">
+      <button class="back-btn" onclick="leaveRoom()">← Leave</button>
+      <div class="listener-count">
+        <span class="status"></span>
+        <span id="host-listener-count">1 listening</span>
+      </div>
+      
+      <div class="card">
+        <h2 style="font-family: 'Syne', sans-serif; margin-bottom: 16px;">Your Room Code</h2>
+        <div class="room-code" id="host-room-code">—</div>
+        <div class="qr-container">
+          <div id="qrcode"></div>
+        </div>
+        <p class="info-text">Share this QR code or room code for others to join</p>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-bottom: 12px;">Add Content</h3>
+        <input type="text" id="video-url" placeholder="Paste YouTube URL">
+        <button class="btn" onclick="addContent()">Play Now</button>
+      </div>
+
+      <div id="host-player-container"></div>
+      <div id="host-now-playing"></div>
+
+      <div class="chat-container">
+        <div class="chat-header">
+          <span class="status"></span> Live Chat
+        </div>
+        <div class="chat-messages" id="host-chat"></div>
+        <div class="chat-input-container">
+          <input type="text" id="host-message" placeholder="Say something..." onkeypress="if(event.key==='Enter') sendMessage()">
+          <button class="btn btn-primary" onclick="sendMessage()">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Join Screen -->
+    <div id="join-screen" class="screen">
+      <button class="back-btn" onclick="showHomeScreen()">← Back</button>
+      
+      <div class="card">
+        <h2 style="font-family: 'Syne', sans-serif; margin-bottom: 16px;">Join a Room</h2>
+        <input type="text" id="join-room-code" placeholder="Enter room code">
+        <input type="text" id="listener-name" placeholder="Your name">
+        <button class="btn btn-primary" onclick="joinRoom()">Join</button>
+        <p class="info-text">Or scan the host's QR code to join automatically</p>
+      </div>
+    </div>
+
+    <!-- Listener Screen -->
+    <div id="listener-screen" class="screen">
+      <button class="back-btn" onclick="leaveRoom()">← Leave</button>
+      <div class="listener-count">
+        <span class="status"></span>
+        <span id="listener-count-text">0 listening</span>
+      </div>
+
+      <div id="listener-player-container"></div>
+      <div id="listener-now-playing"></div>
+
+      <div class="chat-container">
+        <div class="chat-header">
+          <span class="status"></span> Live Chat
+        </div>
+        <div class="chat-messages" id="listener-chat"></div>
+        <div class="chat-input-container">
+          <input type="text" id="listener-message" placeholder="Say something..." onkeypress="if(event.key==='Enter') sendMessage()">
+          <button class="btn btn-primary" onclick="sendMessage()">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Firebase Configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyD9DO3UUHNRO8v6-L--MhHpDYTMKI3sH_g",
+      authDomain: "localradio-2b215.firebaseapp.com",
+      databaseURL: "https://localradio-2b215-default-rtdb.firebaseio.com",
+      projectId: "localradio-2b215",
+      storageBucket: "localradio-2b215.firebasestorage.app",
+      messagingSenderId: "14862492617",
+      appId: "1:14862492617:web:7bc89187a6419edecdbe18"
+    };
+
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+
+    // State management
+    let state = {
+      isHost: false,
+      roomCode: null,
+      currentVideo: null,
+      userName: 'Anonymous',
+      userId: 'user_' + Math.random().toString(36).substr(2, 9),
+      roomRef: null,
+      listeners: {}
+    };
+
+    // Utility functions
+    function generateRoomCode() {
+      return Math.random().toString(36).substring(2, 8).toUpperCase();
+    }
+
+    function extractVideoId(url) {
+      const patterns = [
+        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+        /youtube\.com\/watch\?.*v=([a-zA-Z0-9_-]{11})/
+      ];
+      
+      for (let pattern of patterns) {
+        const match = url.match(pattern);
+        if (match && match[1]) {
+          return match[1];
+        }
+      }
+      
+      if (/^[a-zA-Z0-9_-]{11}$/.test(url)) {
+        return url;
+      }
+      
+      return null;
+    }
+
+    // Navigation
+    function showScreen(screenId) {
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById(screenId).classList.add('active');
+    }
+
+    function showHomeScreen() {
+      if (state.roomRef) {
+        database.ref(`rooms/${state.roomCode}/listeners/${state.userId}`).remove();
+      }
+      showScreen('home-screen');
+      state = { 
+        isHost: false, 
+        roomCode: null, 
+        currentVideo: null, 
+        userName: 'Anonymous',
+        userId: 'user_' + Math.random().toString(36).substr(2, 9),
+        roomRef: null,
+        listeners: {}
+      };
+    }
+
+    function leaveRoom() {
+      if (confirm('Leave this room?')) {
+        if (state.roomRef) {
+          database.ref(`rooms/${state.roomCode}/listeners/${state.userId}`).remove();
+          if (state.isHost) {
+            database.ref(`rooms/${state.roomCode}`).remove();
+          }
+        }
+        showHomeScreen();
+      }
+    }
+
+    function showHostScreen() {
+      state.isHost = true;
+      state.roomCode = generateRoomCode();
+      state.userName = 'Host';
+      state.roomRef = database.ref(`rooms/${state.roomCode}`);
+      
+      // Create room in database
+      state.roomRef.set({
+        host: state.userId,
+        createdAt: Date.now(),
+        currentVideo: null,
+        listeners: {
+          [state.userId]: {
+            name: 'Host',
+            joinedAt: Date.now()
+          }
+        }
+      });
+
+      // Listen for changes
+      listenToRoom();
+      
+      showScreen('host-screen');
+      document.getElementById('host-room-code').textContent = state.roomCode;
+      
+      // Generate QR code
+      document.getElementById('qrcode').innerHTML = '';
+      new QRCode(document.getElementById('qrcode'), {
+        text: window.location.href.split('?')[0] + '?room=' + state.roomCode,
+        width: 200,
+        height: 200
+      });
+
+      addSystemMessage('🎵 Room created! Share your code to start broadcasting.');
+    }
+
+    function showJoinScreen() {
+      showScreen('join-screen');
+      
+      const urlParams = new URLSearchParams(window.location.search);
+      const roomFromUrl = urlParams.get('room');
+      if (roomFromUrl) {
+        document.getElementById('join-room-code').value = roomFromUrl;
+      }
+    }
+
+    function joinRoom() {
+      const roomCode = document.getElementById('join-room-code').value.trim().toUpperCase();
+      const name = document.getElementById('listener-name').value.trim() || 'Listener';
+      
+      if (!roomCode) {
+        alert('Please enter a room code');
+        return;
+      }
+
+      // Check if room exists
+      database.ref(`rooms/${roomCode}`).once('value', (snapshot) => {
+        if (!snapshot.exists()) {
+          alert('Room not found! Check the code and try again.');
+          return;
+        }
+
+        state.roomCode = roomCode;
+        state.userName = name;
+        state.roomRef = database.ref(`rooms/${state.roomCode}`);
+        
+        // Add self to listeners
+        database.ref(`rooms/${roomCode}/listeners/${state.userId}`).set({
+          name: name,
+          joinedAt: Date.now()
+        });
+
+        listenToRoom();
+        showScreen('listener-screen');
+        addSystemMessage(`🎵 Welcome ${name}! You're now tuned in.`);
+      });
+    }
+
+    // Room sync
+    function listenToRoom() {
+      // Listen for video changes
+      state.roomRef.child('currentVideo').on('value', (snapshot) => {
+        const videoId = snapshot.val();
+        if (videoId && videoId !== state.currentVideo) {
+          state.currentVideo = videoId;
+          playVideo(videoId);
+        }
+      });
+
+      // Listen for chat messages
+      state.roomRef.child('messages').on('child_added', (snapshot) => {
+        const msg = snapshot.val();
+        if (msg) {
+          displayMessage(msg.author, msg.text, msg.isSystem);
+        }
+      });
+
+      // Listen for listener count
+      state.roomRef.child('listeners').on('value', (snapshot) => {
+        const listeners = snapshot.val() || {};
+        state.listeners = listeners;
+        const count = Object.keys(listeners).length;
+        
+        const hostCount = document.getElementById('host-listener-count');
+        const listenerCount = document.getElementById('listener-count-text');
+        
+        if (hostCount) hostCount.textContent = `${count} listening`;
+        if (listenerCount) listenerCount.textContent = `${count} listening`;
+      });
+    }
+
+    // Content management
+    function addContent() {
+      const url = document.getElementById('video-url').value.trim();
+      
+      if (!url) {
+        alert('Please enter a YouTube URL');
+        return;
+      }
+      
+      const videoId = extractVideoId(url);
+      
+      if (!videoId) {
+        alert('Invalid YouTube URL. Try:\n• https://youtube.com/watch?v=VIDEO_ID\n• https://youtu.be/VIDEO_ID\n• Or just paste the 11-character video ID');
+        return;
+      }
+
+      document.getElementById('video-url').value = '';
+      
+      // Update in database - this will trigger playVideo for everyone
+      state.roomRef.update({
+        currentVideo: videoId
+      });
+
+      sendSystemMessage('🎵 Now playing!');
+    }
+
+    function playVideo(videoId) {
+      // Clear both containers first
+      const hostContainer = document.getElementById('host-player-container');
+      const listenerContainer = document.getElementById('listener-player-container');
+      if (hostContainer) hostContainer.innerHTML = '';
+      if (listenerContainer) listenerContainer.innerHTML = '';
+      
+      const containerId = state.isHost ? 'host-player-container' : 'listener-player-container';
+      const nowPlayingId = state.isHost ? 'host-now-playing' : 'listener-now-playing';
+      
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      
+      container.innerHTML = `
+        <div class="player">
+          <iframe 
+            src="https://www.youtube.com/embed/${videoId}?autoplay=1&controls=1&enablejsapi=1&origin=${window.location.origin}" 
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowfullscreen>
+          </iframe>
+        </div>
+      `;
+
+      const nowPlaying = document.getElementById(nowPlayingId);
+      if (nowPlaying) {
+        nowPlaying.innerHTML = `
+          <div class="now-playing">
+            <h3>Now Playing</h3>
+            <p>Video ID: ${videoId}</p>
+          </div>
+        `;
+      }
+    }
+
+    // Chat functionality
+    function sendMessage() {
+      const input = document.getElementById(state.isHost ? 'host-message' : 'listener-message');
+      const text = input.value.trim();
+      if (!text) return;
+      
+      state.roomRef.child('messages').push({
+        author: state.userName,
+        text: text,
+        timestamp: Date.now(),
+        isSystem: false
+      });
+      
+      input.value = '';
+    }
+
+    function sendSystemMessage(text) {
+      state.roomRef.child('messages').push({
+        author: 'System',
+        text: text,
+        timestamp: Date.now(),
+        isSystem: true
+      });
+    }
+
+    function displayMessage(author, text, isSystem = false) {
+      const chatId = state.isHost ? 'host-chat' : 'listener-chat';
+      const chat = document.getElementById(chatId);
+      if (!chat) return;
+
+      const message = document.createElement('div');
+      message.className = 'message';
+      
+      if (isSystem) {
+        message.style.borderLeft = '3px solid var(--secondary)';
+        message.innerHTML = `<div class="message-text" style="color: var(--text-dim); font-style: italic;">${text}</div>`;
+      } else {
+        message.innerHTML = `
+          <div class="message-author">${author}</div>
+          <div class="message-text">${text}</div>
+        `;
+      }
+      
+      chat.appendChild(message);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function addSystemMessage(text) {
+      displayMessage('System', text, true);
+    }
+
+    // Check URL on load for room code
+    window.addEventListener('load', () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const roomFromUrl = urlParams.get('room');
+      if (roomFromUrl) {
+        showJoinScreen();
+      }
+    });
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+      if (state.roomRef) {
+        database.ref(`rooms/${state.roomCode}/listeners/${state.userId}`).remove();
+      }
+    });
+  </script>
+</body>
+</html>
